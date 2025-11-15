@@ -1,102 +1,85 @@
+# attendance.py
 """
-attendance.py — Handles marking attendance after face recognition.
-Uses SQLite (face_attendance.db) and sends email notifications.
+Live attendance using webcam: recognizes faces and logs attendance + email.
 """
 
 import cv2
-import numpy as np
 import os
-from datetime import datetime
 from db import add_attendance, get_user_by_userid
 from email_notifier import send_attendance_email
+from datetime import datetime
+import time
 
-# Path to the Haar Cascade classifier
-CASCADE_PATH = "haarcascades/haarcascade_frontalface_default.xml"
-FACE_RECOGNIZER_PATH = "trainer/trainer.yml"
+CASCADE_PATH = os.path.join("haarcascades", "haarcascade_frontalface_default.xml")
+TRAINER_DIR = "trainer"
 
-# Initialize face detector
-face_detector = cv2.CascadeClassifier(CASCADE_PATH)
+def load_label_map():
+    labels_path = os.path.join(TRAINER_DIR, "labels.txt")
+    if not os.path.exists(labels_path):
+        raise FileNotFoundError("labels.txt not found. Train model first.")
+    mapping = {}
+    with open(labels_path, "r") as f:
+        for line in f:
+            line=line.strip()
+            if not line: continue
+            idx, uid = line.split(",", 1)
+            mapping[int(idx)] = uid
+    return mapping
 
-# Initialize face recognizer (LBPH Face Recognizer)
-# Ensure OpenCV is installed with contrib modules (opencv-contrib-python)
-try:
+def attend(threshold=70):
+    """
+    threshold: confidence threshold for LBPH — lower is better; adjust between 40-100 depending on camera/environment.
+    """
+    if not os.path.exists(os.path.join(TRAINER_DIR, "trainer.yml")):
+        raise FileNotFoundError("trainer.yml not found. Run train.py first.")
+
+    label_map = load_label_map()
     recognizer = cv2.face.LBPHFaceRecognizer_create()
-except AttributeError:
-    raise RuntimeError(
-        "❌ OpenCV not compiled with 'face' module.\n"
-        "Please install it using:\n"
-        "pip install opencv-contrib-python"
-    )
+    recognizer.read(os.path.join(TRAINER_DIR, "trainer.yml"))
+    face_cascade = cv2.CascadeClassifier(CASCADE_PATH)
+    cam = cv2.VideoCapture(0)
 
-# Load trained model if available
-if os.path.exists(FACE_RECOGNIZER_PATH):
-    recognizer.read(FACE_RECOGNIZER_PATH)
-else:
-    raise FileNotFoundError("❌ Trainer file not found! Please run train.py first.")
+    last_logged = {}  # user_id -> last log timestamp to avoid duplicate logs within short span
 
-
-def mark_attendance():
-    """
-    Starts webcam, recognizes faces, and marks attendance in the database.
-    Sends an email notification after successful recognition.
-    """
-    cam = cv2.VideoCapture(0, cv2.CAP_DSHOW)
-    font = cv2.FONT_HERSHEY_SIMPLEX
-
-    print("\n[INFO] Starting face recognition... Press 'q' to quit.\n")
-
+    print("[INFO] Starting attendance. Press 'q' to quit.")
     while True:
-        ret, frame = cam.read()
+        ret, img = cam.read()
         if not ret:
-            print("❌ Camera not detected.")
             break
-
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        faces = face_detector.detectMultiScale(gray, 1.2, 5)
-
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        faces = face_cascade.detectMultiScale(gray, scaleFactor=1.2, minNeighbors=5)
         for (x, y, w, h) in faces:
-            user_id_pred, confidence = recognizer.predict(gray[y:y+h, x:x+w])
-            confidence_percent = round(100 - confidence)
-
-            if confidence_percent > 55:  # confident enough
-                # Fetch user info from DB
-                user = get_user_by_userid(str(user_id_pred))
-
+            face_img = gray[y:y+h, x:x+w]
+            label, confidence = recognizer.predict(face_img)  # lower confidence = better match
+            text = "Unknown"
+            if confidence < threshold and label in label_map:
+                user_id = label_map[label]
+                user = get_user_by_userid(user_id)
                 if user:
                     name = user["name"]
-                    user_id = user["user_id"]
-                    email = user["email"]
-                    timestamp_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-                    # Mark attendance in DB
-                    add_attendance(user_id)
-
-                    # Draw rectangle & display user info
-                    cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
-                    cv2.putText(frame, f"{name} ({confidence_percent}%)", (x + 5, y - 5), font, 0.8, (0, 255, 0), 2)
-
-                    # Send email
-                    print(f"[INFO] Marked attendance for {name} ({user_id})")
-                    send_attendance_email(email, name, user_id, timestamp_str)
-
+                    text = f"{name} ({user_id}) - {confidence:.1f}"
+                    # Avoid duplicate logging within, say, 30 seconds
+                    now = time.time()
+                    if user_id not in last_logged or (now - last_logged[user_id]) > 30:
+                        add_attendance(user_id, status="Present")
+                        timestamp_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        # send email (non-blocking idea: could spawn thread; for simplicity, call directly)
+                        send_attendance_email(user["email"], user["name"], user_id, timestamp_str)
+                        last_logged[user_id] = now
                 else:
-                    cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 0, 255), 2)
-                    cv2.putText(frame, "Unknown", (x + 5, y - 5), font, 0.8, (0, 0, 255), 2)
-
+                    text = f"Unknown ({user_id})"
             else:
-                cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 0, 255), 2)
-                cv2.putText(frame, "Uncertain", (x + 5, y - 5), font, 0.8, (0, 0, 255), 2)
+                text = f"Unknown - {confidence:.1f}"
 
-        cv2.imshow("Face Attendance System", frame)
-
-        # Exit on pressing 'q'
+            cv2.rectangle(img, (x,y), (x+w, y+h), (0,255,0), 2)
+            cv2.putText(img, text, (x, y-10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,0), 2)
+        cv2.imshow("Attendance - Press q to Quit", img)
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
 
     cam.release()
     cv2.destroyAllWindows()
-    print("\n[INFO] Attendance session ended.\n")
-
+    print("[INFO] Attendance stopped.")
 
 if __name__ == "__main__":
-    mark_attendance()
+    attend(threshold=70)

@@ -1,76 +1,116 @@
+# db.py
 """
-db.py — Local SQLite database for Face Attendance System (no XAMPP required)
+Database helper for Face Recognition Attendance System.
+Uses mysql-connector-python.
 """
 
-import sqlite3
+import mysql.connector
+from mysql.connector import Error
 from datetime import datetime
-import os
 
-DB_PATH = "face_attendance.db"
+# Update these for your local MySQL/XAMPP install
+DB_CONFIG = {
+    "host": "localhost",
+    "port": 3306,
+    "user": "root",
+    "password": "",    # XAMPP default is blank for root
+    "database": "face_attendance"
+}
 
 def get_connection():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+    try:
+        conn = mysql.connector.connect(**DB_CONFIG)
+        return conn
+    except Error as e:
+        print("DB connection error:", e)
+        raise
 
 def init_db():
-    conn = get_connection()
-    c = conn.cursor()
-    # Create users table
-    c.execute('''CREATE TABLE IF NOT EXISTS users (
-                    user_id TEXT PRIMARY KEY,
-                    name TEXT NOT NULL,
-                    email TEXT
-                )''')
-    # Create attendance table
-    c.execute('''CREATE TABLE IF NOT EXISTS attendance (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_id TEXT,
-                    time TEXT,
-                    status TEXT,
-                    FOREIGN KEY(user_id) REFERENCES users(user_id)
-                )''')
+    """Create database and required tables if they don't exist."""
+    tmp_conf = DB_CONFIG.copy()
+    tmp_conf.pop("database")
+    conn = mysql.connector.connect(**tmp_conf)
+    cursor = conn.cursor()
+    cursor.execute("CREATE DATABASE IF NOT EXISTS {}".format(DB_CONFIG["database"]))
     conn.commit()
+    cursor.close()
     conn.close()
 
-def add_user(user_id, name, email):
     conn = get_connection()
-    c = conn.cursor()
-    c.execute("INSERT OR REPLACE INTO users (user_id, name, email) VALUES (?, ?, ?)",
-              (user_id, name, email))
+    cursor = conn.cursor()
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS users (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        user_id VARCHAR(50) UNIQUE NOT NULL,
+        name VARCHAR(255) NOT NULL,
+        email VARCHAR(255) NOT NULL,
+        registered_on DATETIME NOT NULL
+    )""")
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS attendance (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        user_id VARCHAR(50) NOT NULL,
+        login_time DATETIME NOT NULL,
+        status VARCHAR(50)
+    )""")
     conn.commit()
+    cursor.close()
     conn.close()
 
-def get_user_by_userid(user_id):
+def add_user(user_id: str, name: str, email: str):
     conn = get_connection()
-    c = conn.cursor()
-    c.execute("SELECT * FROM users WHERE user_id=?", (user_id,))
-    row = c.fetchone()
-    conn.close()
-    return dict(row) if row else None
-
-def add_attendance(user_id, status="Present"):
-    conn = get_connection()
-    c = conn.cursor()
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    c.execute("INSERT INTO attendance (user_id, time, status) VALUES (?, ?, ?)",
-              (user_id, timestamp, status))
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO users (user_id, name, email, registered_on)
+        VALUES (%s, %s, %s, %s)
+        ON DUPLICATE KEY UPDATE name=%s, email=%s
+    """, (user_id, name, email, datetime.now(), name, email))
     conn.commit()
+    cursor.close()
     conn.close()
 
-def fetch_attendance():
+def get_user_by_userid(user_id: str):
     conn = get_connection()
-    c = conn.cursor()
-    c.execute("""
-        SELECT a.id, u.name, u.email, a.time, a.status as note
+    cursor = conn.cursor(dictionary=True)
+    cursor.execute("SELECT * FROM users WHERE user_id=%s", (user_id,))
+    row = cursor.fetchone()
+    cursor.close()
+    conn.close()
+    return row
+
+def get_user_by_id_numeric(id_numeric: int):
+    conn = get_connection()
+    cursor = conn.cursor(dictionary=True)
+    cursor.execute("SELECT * FROM users WHERE id=%s", (id_numeric,))
+    row = cursor.fetchone()
+    cursor.close()
+    conn.close()
+    return row
+
+def add_attendance(user_id: str, status="Present"):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("INSERT INTO attendance (user_id, login_time, status) VALUES (%s, %s, %s)",
+                   (user_id, datetime.now(), status))
+    conn.commit()
+    cursor.close()
+    conn.close()
+
+def fetch_attendance(limit=100):
+    conn = get_connection()
+    cursor = conn.cursor(dictionary=True)
+    cursor.execute("""
+        SELECT a.id, a.user_id, u.name, u.email, a.login_time, a.status
         FROM attendance a
-        JOIN users u ON a.user_id = u.user_id
-        ORDER BY a.time DESC
-    """)
-    rows = [dict(r) for r in c.fetchall()]
+        LEFT JOIN users u ON u.user_id = a.user_id
+        ORDER BY a.login_time DESC
+        LIMIT %s
+    """, (limit,))
+    rows = cursor.fetchall()
+    cursor.close()
     conn.close()
     return rows
 
-# Initialize DB on import
-if not os.path.exists(DB_PATH):
+if __name__ == "__main__":
     init_db()
+    print("DB initialized.")

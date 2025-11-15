@@ -1,4 +1,6 @@
-
+"""
+Register new user: capture face images, check duplicates, and save to dataset.
+"""
 
 import cv2
 import os
@@ -24,8 +26,8 @@ def check_duplicate_email(email):
     """Check if email already exists in DB."""
     import db
     conn = db.get_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM users WHERE email=?", (email,))
+    cursor = conn.cursor(dictionary=True)
+    cursor.execute("SELECT * FROM users WHERE email=%s", (email,))
     result = cursor.fetchone()
     conn.close()
     return result is not None

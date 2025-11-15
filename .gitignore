@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.env
+venv/
+.env.*
+.DS_Store
+trainer/*.yml
+trainer/labels.txt
+dataset/
+haarcascades/*.xml
+credentials.json

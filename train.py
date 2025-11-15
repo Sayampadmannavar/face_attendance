@@ -1,4 +1,3 @@
-
 # train.py
 """
 Train LBPH face recognizer on images in dataset/.
