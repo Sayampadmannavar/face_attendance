@@ -27,7 +27,8 @@ def _smtp_config_valid():
 
 def send_attendance_email(to_email: str, name: str, user_id: str, timestamp_str: str):
     if not _smtp_config_valid():
-        raise RuntimeError("SMTP configuration missing. Set SMTP_USER and SMTP_APP_PASSWORD environment variables.")
+        print("[WARN] SMTP configuration missing. Email sending disabled. Set SMTP_USER and SMTP_APP_PASSWORD to enable.")
+        return False
 
     subject = "Attendance Recorded"
     body = (
@@ -65,9 +66,11 @@ def send_email(to: str, subject: str, message: str):
     """
     Generic send_email wrapper used by the Flask dashboard endpoint.
     Falls back to sending a simple email from configured SMTP credentials.
+    Returns gracefully if SMTP is not configured.
     """
     if not _smtp_config_valid():
-        raise RuntimeError("SMTP configuration missing. Set SMTP_USER and SMTP_APP_PASSWORD environment variables.")
+        print("[WARN] SMTP configuration missing. Email sending disabled. Set SMTP_USER and SMTP_APP_PASSWORD to enable.")
+        return False
 
     msg = EmailMessage()
     msg["From"] = SMTP_USER
