@@ -60,3 +60,30 @@ if __name__ == "__main__":
         send_attendance_email("someone@example.com", "Test User", "u001", "2025-10-27 12:00:00")
     except Exception as e:
         print("SMTP config missing or test failed:", e)
+
+def send_email(to: str, subject: str, message: str):
+    """
+    Generic send_email wrapper used by the Flask dashboard endpoint.
+    Falls back to sending a simple email from configured SMTP credentials.
+    """
+    if not _smtp_config_valid():
+        raise RuntimeError("SMTP configuration missing. Set SMTP_USER and SMTP_APP_PASSWORD environment variables.")
+
+    msg = EmailMessage()
+    msg["From"] = SMTP_USER
+    msg["To"] = to
+    msg["Subject"] = subject
+    msg.set_content(message)
+
+    try:
+        smtp = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
+        smtp.ehlo()
+        smtp.starttls()
+        smtp.login(SMTP_USER, SMTP_APP_PASSWORD)
+        smtp.send_message(msg)
+        smtp.quit()
+        print(f"[INFO] Email sent to {to}")
+        return True
+    except Exception as e:
+        print("[ERROR] Failed to send email:", e)
+        return False

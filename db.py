@@ -8,13 +8,15 @@ import mysql.connector
 from mysql.connector import Error
 from datetime import datetime
 
-# Update these for your local MySQL/XAMPP install
+import os
+
+# Database configuration — prefer environment variables for deployments.
 DB_CONFIG = {
-    "host": "localhost",
-    "port": 3306,
-    "user": "root",
-    "password": "",    # XAMPP default is blank for root
-    "database": "face_attendance"
+    "host": os.environ.get("DB_HOST", "localhost"),
+    "port": int(os.environ.get("DB_PORT", 3306)),
+    "user": os.environ.get("DB_USER", "root"),
+    "password": os.environ.get("DB_PASSWORD", ""),
+    "database": os.environ.get("DB_DATABASE", "face_attendance")
 }
 
 def get_connection():

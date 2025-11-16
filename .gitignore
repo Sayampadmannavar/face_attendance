@@ -6,6 +6,7 @@ venv/
 .DS_Store
 trainer/*.yml
 trainer/labels.txt
-dataset/
+dataset/*
+!dataset/.gitkeep
 haarcascades/*.xml
 credentials.json
