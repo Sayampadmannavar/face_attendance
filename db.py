@@ -161,6 +161,25 @@ def get_user_by_userid(user_id: str):
         return _row_to_dict(row)
 
 
+def get_user_by_email(email: str):
+    """Return a user row by email or None. Works for both MySQL and SQLite."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    if _using_mysql_available():
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("SELECT * FROM users WHERE email=%s", (email,))
+        row = cursor.fetchone()
+        cursor.close()
+        conn.close()
+        return row
+    else:
+        cursor.execute("SELECT * FROM users WHERE email=?", (email,))
+        row = cursor.fetchone()
+        cursor.close()
+        conn.close()
+        return _row_to_dict(row)
+
+
 def get_user_by_id_numeric(id_numeric: int):
     conn = get_connection()
     cursor = conn.cursor()

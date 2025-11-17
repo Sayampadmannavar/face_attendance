@@ -5,9 +5,8 @@ Register new user: capture face images, check duplicates, and save to dataset.
 import cv2
 import os
 import numpy as np
-from db import add_user
+from db import add_user, get_user_by_email
 from datetime import datetime
-import mysql.connector
 
 CASCADE_PATH = os.path.join("haarcascades", "haarcascade_frontalface_default.xml")
 DATASET_DIR = "dataset"
@@ -24,13 +23,8 @@ def ensure_dirs():
 
 def check_duplicate_email(email):
     """Check if email already exists in DB."""
-    import db
-    conn = db.get_connection()
-    cursor = conn.cursor(dictionary=True)
-    cursor.execute("SELECT * FROM users WHERE email=%s", (email,))
-    result = cursor.fetchone()
-    conn.close()
-    return result is not None
+    user = get_user_by_email(email)
+    return user is not None
 
 
 def check_duplicate_face(face_roi):
