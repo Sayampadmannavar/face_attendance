@@ -57,11 +57,11 @@ def register_user(user_id: str, name: str, email: str, samples=30):
     """
     ensure_dirs()
 
-    # --- 1️⃣ Check duplicate email ---
+    # Check duplicate email
     if check_duplicate_email(email):
-        raise ValueError(f"⚠️ This email '{email}' is already registered!")
+        raise ValueError(f"This email '{email}' is already registered!")
 
-    # --- 2️⃣ Initialize face detection ---
+    # Initialize face detection
     cv2 = _get_cv2()
     face_cascade = cv2.CascadeClassifier(CASCADE_PATH)
     cam = cv2.VideoCapture(0)
@@ -72,7 +72,7 @@ def register_user(user_id: str, name: str, email: str, samples=30):
     count = 0
     duplicate_detected = False
 
-    # --- 3️⃣ Capture loop ---
+    # Capture loop
     while True:
         ret, img = cam.read()
         if not ret:
@@ -84,9 +84,9 @@ def register_user(user_id: str, name: str, email: str, samples=30):
         for (x, y, w, h) in faces:
             face_roi = gray[y:y+h, x:x+w]
 
-            # --- 4️⃣ Check if this face already exists ---
+            # Check if this face already exists
             if check_duplicate_face(face_roi):
-                print("⚠️ This face already exists in the system! Registration aborted.")
+                print("This face already exists in the system! Registration aborted.")
                 duplicate_detected = True
                 break
 
@@ -105,11 +105,11 @@ def register_user(user_id: str, name: str, email: str, samples=30):
     cam.release()
     cv2.destroyAllWindows()
 
-    # --- 5️⃣ Handle duplicate detection ---
+    # Handle duplicate detection
     if duplicate_detected:
-        raise ValueError("⚠️ Registration aborted: This face already exists in the system!")
+        raise ValueError("Registration aborted: This face already exists in the system!")
 
-    # --- 6️⃣ Save user info in DB ---
+    # Save user info in DB
     add_user(user_id, name, email)
     print(f"[INFO] Collected {count} images for {name}.")
     return count
