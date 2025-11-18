@@ -52,13 +52,18 @@ except Exception:
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.urandom(24)
 
-# Ensure DB initialization if available
-if init_db:
-    try:
-        init_db()
-    except Exception:
-        # ignore init errors here, endpoints will return details
-        pass
+# Defer DB initialization until first request (speeds up app startup)
+_db_initialized = False
+
+def _ensure_db_init():
+    """Initialize DB on first request (lazy loading for faster startup)."""
+    global _db_initialized
+    if not _db_initialized and init_db:
+        try:
+            init_db()
+            _db_initialized = True
+        except Exception as e:
+            print(f"[WARN] DB init on first request: {e}")
 
 # Embedded HTML template (single-page app)
 HTML = r'''<!doctype html>
@@ -327,6 +332,7 @@ def api_attend():
 
 @app.route('/api/attendance', methods=['GET'])
 def api_attendance():
+    _ensure_db_init()  # Initialize DB if not already done
     if fetch_attendance is None:
         return jsonify(ok=False, error='fetch_attendance not found. Ensure db.py exposes fetch_attendance()')
     try:
@@ -396,6 +402,7 @@ def api_send_email():
 # health
 @app.route('/api/health')
 def health():
+    _ensure_db_init()  # Initialize DB if not already done
     available = {
         'register': register_user is not None,
         'train': train_model is not None,

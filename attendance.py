@@ -1,42 +1,71 @@
 # attendance.py
 """
 Live attendance using webcam: recognizes faces and logs attendance + email.
+Optimized with lazy loading and model caching for faster startup.
 """
 
-import cv2
 import os
 from db import add_attendance, get_user_by_userid
-from email_notifier import send_attendance_email
 from datetime import datetime
 import time
+import threading
 
 CASCADE_PATH = os.path.join("haarcascades", "haarcascade_frontalface_default.xml")
 TRAINER_DIR = "trainer"
 
-def load_label_map():
+# Lazy-loaded and cached modules
+_cv2 = None
+_recognizer = None
+_face_cascade = None
+_label_map = None
+
+def _lazy_import_cv2():
+    """Import cv2 only when first needed."""
+    global _cv2
+    if _cv2 is None:
+        import cv2
+        _cv2 = cv2
+    return _cv2
+
+def _lazy_load_model():
+    """Load LBPH recognizer and cascade classifier once (cached)."""
+    global _recognizer, _face_cascade, _label_map
+    if _recognizer is not None and _face_cascade is not None:
+        return _recognizer, _face_cascade, _label_map
+    
+    cv2 = _lazy_import_cv2()
+    
+    # Load label map
     labels_path = os.path.join(TRAINER_DIR, "labels.txt")
     if not os.path.exists(labels_path):
         raise FileNotFoundError("labels.txt not found. Train model first.")
     mapping = {}
     with open(labels_path, "r") as f:
         for line in f:
-            line=line.strip()
-            if not line: continue
+            line = line.strip()
+            if not line:
+                continue
             idx, uid = line.split(",", 1)
             mapping[int(idx)] = uid
-    return mapping
+    _label_map = mapping
+    
+    # Load LBPH recognizer
+    if not os.path.exists(os.path.join(TRAINER_DIR, "trainer.yml")):
+        raise FileNotFoundError("trainer.yml not found. Run train.py first.")
+    _recognizer = cv2.face.LBPHFaceRecognizer_create()
+    _recognizer.read(os.path.join(TRAINER_DIR, "trainer.yml"))
+    
+    # Load cascade classifier
+    _face_cascade = cv2.CascadeClassifier(CASCADE_PATH)
+    
+    return _recognizer, _face_cascade, _label_map
 
 def attend(threshold=70):
     """
     threshold: confidence threshold for LBPH — lower is better; adjust between 40-100 depending on camera/environment.
     """
-    if not os.path.exists(os.path.join(TRAINER_DIR, "trainer.yml")):
-        raise FileNotFoundError("trainer.yml not found. Run train.py first.")
-
-    label_map = load_label_map()
-    recognizer = cv2.face.LBPHFaceRecognizer_create()
-    recognizer.read(os.path.join(TRAINER_DIR, "trainer.yml"))
-    face_cascade = cv2.CascadeClassifier(CASCADE_PATH)
+    cv2 = _lazy_import_cv2()
+    recognizer, face_cascade, label_map = _lazy_load_model()
     cam = cv2.VideoCapture(0)
 
     last_logged = {}  # user_id -> last log timestamp to avoid duplicate logs within short span
@@ -63,8 +92,17 @@ def attend(threshold=70):
                     if user_id not in last_logged or (now - last_logged[user_id]) > 30:
                         add_attendance(user_id, status="Present")
                         timestamp_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                        # send email (non-blocking idea: could spawn thread; for simplicity, call directly)
-                        send_attendance_email(user["email"], user["name"], user_id, timestamp_str)
+                        # send email asynchronously (non-blocking) to avoid slowing down attendance
+                        try:
+                            from email_notifier import send_attendance_email
+                            thread = threading.Thread(
+                                target=send_attendance_email,
+                                args=(user["email"], user["name"], user_id, timestamp_str),
+                                daemon=True
+                            )
+                            thread.start()
+                        except Exception as e:
+                            print(f"[WARN] Could not send email async: {e}")
                         last_logged[user_id] = now
                 else:
                     text = f"Unknown ({user_id})"
